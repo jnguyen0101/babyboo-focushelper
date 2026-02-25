@@ -12,8 +12,7 @@ if not os.path.exists(video_path):
     print(f"Error: {video_path} not found in {os.getcwd()}")
     exit()
 
-# Try opening with the MSMF backend for better .mov support on Windows
-video_cap = cv2.VideoCapture(video_path, cv2.CAP_MSMF)
+video_cap = cv2.VideoCapture(video_path, cv2.CAP_ANY)
 cap = cv2.VideoCapture(0)
 
 video_window_name = "GET BACK TO WORK"
@@ -45,8 +44,7 @@ while cap.isOpened():
             ret, v_frame = video_cap.read()
 
         if ret and v_frame is not None:
-            # Resize video if it's too huge (optional)
-            # v_frame = cv2.resize(v_frame, (640, 360)) 
+            v_frame = cv2.resize(v_frame, (640, 360)) 
             
             cv2.imshow(video_window_name, v_frame)
             window_open = True
