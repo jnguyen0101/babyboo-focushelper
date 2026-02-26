@@ -2,8 +2,9 @@ import cv2
 import mediapipe as mp
 import sounddevice as sd
 import soundfile as sf
+import time
 
-# The playlist
+# Define the playlist
 playlist = [
     {"video": "media/triggering_breakup.mov", "audio": "media/triggering_breakup.wav"},
     {"video": "media/pinky_up.mov", "audio": "media/pinky_up.wav"},
@@ -12,14 +13,23 @@ playlist = [
 
 current_idx = 0
 audio_data, fs = None, None
+video_fps = 30.0
+distraction_start_time = 0
 
 def load_media(idx):
-    global audio_data, fs
+    global audio_data, fs, video_fps
     item = playlist[idx]
+    
+    # Load audio
     audio_data, fs = sf.read(item["audio"], dtype='float32')
-    return cv2.VideoCapture(item["video"])
+    
+    # Load video and get native FPS
+    v_cap = cv2.VideoCapture(item["video"])
+    video_fps = v_cap.get(cv2.CAP_PROP_FPS)
+    if video_fps <= 0: video_fps = 30.0
+    
+    return v_cap
 
-# Initial Setup
 video_cap = load_media(current_idx)
 cap = cv2.VideoCapture(0)
 mp_face_mesh = mp.solutions.face_mesh
@@ -34,7 +44,8 @@ while cap.isOpened():
     if not success: break
 
     frame = cv2.flip(frame, 1)
-    results = face_mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(rgb_frame)
     
     looking_away = True 
     if results.multi_face_landmarks:
@@ -42,37 +53,46 @@ while cap.isOpened():
         if 0.35 < nose.x < 0.65 and 0.35 < nose.y < 0.65:
             looking_away = False
 
-    # Detect the moment you look away
+    # Just looked away
     if looking_away and not was_looking_away:
-        video_cap.release()
-        video_cap = load_media(current_idx)
-        
-        # Start Audio
+        distraction_start_time = time.time()
         sd.play(audio_data, fs, loop=True)
         audio_playing = True
-        
-        # Move to next video
-        current_idx = (current_idx + 1) % len(playlist)
 
+    # While looking away
     if looking_away:
+        # Calculate exactly which frame we should be on based on elapsed time
+        elapsed_time = time.time() - distraction_start_time
+        target_frame = int(elapsed_time * video_fps)
+
+        # Jump to that specific frame
+        video_cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+
         ret, v_frame = video_cap.read()
-        # If video ends naturally while looking away, loop THIS specific video
+        
+        # If video ends, loop it
         if not ret:
+            distraction_start_time = time.time()
             video_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ret, v_frame = video_cap.read()
 
         if ret:
             v_frame = cv2.resize(v_frame, (360, 640)) 
             cv2.imshow(video_window_name, v_frame)
+            
+    # Stopped looking away
     else:
-        # Stopped looking away
         if audio_playing:
             sd.stop()
             audio_playing = False
+
+            # Increment playlist for the next time you look away
+            current_idx = (current_idx + 1) % len(playlist)
+            video_cap.release()
+            video_cap = load_media(current_idx)
             try: cv2.destroyWindow(video_window_name)
             except: pass
 
-    # Update state for next frame comparison
     was_looking_away = looking_away
 
     # Status UI
